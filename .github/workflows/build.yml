@@ -121,7 +121,7 @@ jobs:
       # 步骤8: 如果需要，通过 SSH 连接进行调试
       - name: SSH connection to debug
         if: env.SSH_ACTIONS == 'true' || job.status == 'failure'
-        uses: mxschmitt/action-tmate@main
+        uses: mxschmitt/action-tmate@v3
 
       # 步骤9: 整理并上传固件
       - name: Upload firmware artifact
