@@ -47,7 +47,7 @@ jobs:
       # 步骤1: 检出仓库代码
       # 目的是获取我们仓库中的 .config 文件和此 workflow 文件本身
       - name: Checkout repository
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
 
       # 步骤2: 初始化编译环境，安装必要依赖
       - name: Initialize build environment
@@ -96,7 +96,7 @@ jobs:
 
       # 步骤6: 启用 ccache 编译缓存
       - name: Setup ccache
-        uses: actions/cache@main
+        uses: actions/cache@v6
         with:
           path: ~/.ccache
           key: ${{ runner.os }}-ccache-${{ github.workflow }}-${{ hashFiles('openwrt/.config') }}
@@ -123,7 +123,7 @@ jobs:
 
       # 步骤9: 整理并上传固件
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: openwrt/bin/targets
