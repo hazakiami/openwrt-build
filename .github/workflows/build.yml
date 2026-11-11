@@ -1,0 +1,122 @@
+# # GitHub Actions - 编译 OpenWrt（快照测试） #
+# # 源码: https://github.com/openwrt/openwrt #
+name: Build OpenWrt
+
+# # 脚本触发控制 #
+on: # 仅推送触发，无定时编译
+  push:
+    branches:
+      - main
+
+# # 环境变量，保持与原脚本一致的 .config 引用方式 #
+env:
+  # OpenWrt 源码仓库地址
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  # OpenWrt 源码分支（快照测试，跟 main 走）
+  REPO_BRANCH: main
+  # 您的 OpenWrt .config 文件在仓库中的路径
+  CONFIG_FILE: ./openwrt.config
+  # 编译产物（固件）上传到 Artifacts 时的名称
+  ARTIFACT_NAME: OpenWrt_Firmware_${{ github.run_number }}
+  # SSH 调试开关：仓库 Settings -> Secrets and variables -> Actions -> Variables
+  # 新建 OPENWRT_SSH_DEBUG = true 即可在构建失败时拉起 upterm 会话；用完删掉或改回 false
+  SSH_ACTIONS: ${{ vars.OPENWRT_SSH_DEBUG }}
+
+jobs:
+  build:
+    # GitHub 的 latest 标签已更新至 26.04
+    runs-on: ubuntu-latest
+    # 防止调试会话或异常构建占满默认 360 分钟额度
+    timeout-minutes: 180
+
+    steps:
+      # 步骤1: 检出仓库代码
+      # 目的是获取我们仓库中的 .config 文件和此 workflow 文件本身
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # 步骤2: 初始化编译环境，安装必要依赖（沿用原有清单）
+      - name: Initialize build environment
+        run: |
+          echo "Installing build dependencies..."
+          sudo apt update
+          sudo apt install -y \
+            bzip2 g++ gawk gcc git glibc-source libncurses-dev make
+          # 上面是 OpenWrt 官方清单，其中不含 ccache，单独补装
+          sudo apt install -y ccache
+
+      # 步骤3: 克隆 OpenWrt 源码
+      - name: Clone OpenWrt source code
+        run: |
+          echo "Cloning OpenWrt from ${{ env.REPO_URL }} branch ${{ env.REPO_BRANCH }}"
+          git clone --depth 1 --branch ${{ env.REPO_BRANCH }} ${{ env.REPO_URL }} openwrt
+          cd openwrt
+          # 显示一下 commit log
+          git log -1
+
+      # 步骤4: 更新与安装 Feeds
+      - name: Update and install feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # 步骤5: 载入自定义 .config 文件（原脚本的引用方式，不做任何追加/改写）
+      - name: Load custom configuration
+        run: |
+          if [ -f "${{ env.CONFIG_FILE }}" ]; then
+            echo "Found custom config file, copying to .config"
+            cp "${{ env.CONFIG_FILE }}" openwrt/.config
+          else
+            echo "Custom config file not found, using default .config"
+          fi
+          cd openwrt
+          make defconfig
+
+      # 步骤6: 启用 ccache 编译缓存
+      # 缓存目录由 rules.mk 决定：CONFIG_CCACHE_DIR 为空时默认 $(TOPDIR)/.ccache
+      - name: Setup ccache
+        uses: actions/cache@v6
+        with:
+          path: openwrt/.ccache
+          # key 末尾带 run_id：既保证每次都命中上一次的缓存，又保证每次都回写新缓存
+          # （固定 key 的缓存一旦写入就不可更新，会导致后续编译对象永远存不进去）
+          key: ${{ runner.os }}-ccache-${{ github.workflow }}-${{ hashFiles('openwrt.config') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ github.workflow }}-${{ hashFiles('openwrt.config') }}-
+            ${{ runner.os }}-ccache-${{ github.workflow }}-
+
+      # 步骤7: 编译固件
+      # -j$(nproc) 将使用所有可用的 CPU 核心进行并行编译
+      - name: Compile the firmware
+        run: |
+          cd openwrt
+          echo "show cpu"
+          lscpu
+          free -m
+          # rules.mk 里只用 ifneq ($(CONFIG_CCACHE),) 判空来激活 ccache，
+          # 命令行变量优先级高于 .config，并通过 MAKEFLAGS 传给所有子 make，
+          # 因此无需在 .config 里写 CONFIG_CCACHE=y。
+          CCACHE_DIR="$PWD/.ccache" ccache -M 2G
+          echo "Starting firmware compilation..."
+          make CONFIG_CCACHE=y -j$(nproc)
+          echo "ccache stats:"
+          CCACHE_DIR="$PWD/.ccache" ccache -s || true
+
+      # 步骤8: 构建失败时，通过 upterm 建立 SSH 调试会话
+      # tmate 上游已停止维护，改用 upterm（owenthereal/action-upterm）
+      - name: SSH connection to debug
+        if: failure() && env.SSH_ACTIONS == 'true'
+        uses: owenthereal/action-upterm@v2
+        with:
+          # 只授权触发本次工作流的账号（其 GitHub 公钥）进入，避免会话被他人接入
+          limit-access-to-actor: true
+          # 最多等 30 分钟无人接入就自动结束，不会一直占着 runner
+          wait-timeout-minutes: 30
+
+      # 步骤9: 整理并上传固件
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: openwrt/bin/targets
