@@ -1,0 +1,36 @@
+# Dependabot 自动跟踪 GitHub Actions 版本
+# 生效方式：本文件位于默认分支（main）即自动开启，无需在 Settings 里额外点开关。
+# 公开仓库与私有仓库均免费。
+version: 2
+
+updates:
+  # 扫描 .github/workflows/*.yml 里的 `uses: owner/repo@ref` 与仓库根的 action.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+
+    # 同时最多挂几个 PR，避免堆积
+    open-pull-requests-limit: 5
+
+    # 把所有 action 的升级合并成一个 PR，减少打扰
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+    commit-message:
+      prefix: "ci"
+
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+    # 若只想手动决定大版本升级，取消下面注释：只允许 patch/minor 自动提 PR
+    # ignore:
+    #   - dependency-name: "*"
+    #     update-types:
+    #       - "version-update:semver-major"
