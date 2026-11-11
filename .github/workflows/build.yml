@@ -3,10 +3,13 @@
 name: Build OpenWrt
 
 # # 脚本触发控制 #
-on: # 仅推送触发，无定时编译
-  push:
-    branches:
-      - main
+on: # 仅手动触发：仓库 Actions 页面 -> Build OpenWrt -> Run workflow
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: '构建失败时开启 upterm SSH 调试会话'
+        type: boolean
+        default: false
 
 # # 环境变量，保持与原脚本一致的 .config 引用方式 #
 env:
@@ -18,8 +21,10 @@ env:
   CONFIG_FILE: ./openwrt.config
   # 编译产物（固件）上传到 Artifacts 时的名称
   ARTIFACT_NAME: OpenWrt_Firmware_${{ github.run_number }}
-  # SSH 调试开关：仓库 Settings -> Secrets and variables -> Actions -> Variables
-  # 新建 OPENWRT_SSH_DEBUG = true 即可在构建失败时拉起 upterm 会话；用完删掉或改回 false
+  # SSH 调试开关（二选一）：
+  #   1) 手动触发时直接勾选 debug 输入，最省事；
+  #   2) 或在 Settings -> Secrets and variables -> Actions -> Variables
+  #      建 OPENWRT_SSH_DEBUG = true，让每次失败都自动进入调试会话。
   SSH_ACTIONS: ${{ vars.OPENWRT_SSH_DEBUG }}
 
 jobs:
@@ -106,7 +111,7 @@ jobs:
       # 步骤8: 构建失败时，通过 upterm 建立 SSH 调试会话
       # tmate 上游已停止维护，改用 upterm（owenthereal/action-upterm）
       - name: SSH connection to debug
-        if: failure() && env.SSH_ACTIONS == 'true'
+        if: failure() && (inputs.debug || env.SSH_ACTIONS == 'true')
         uses: owenthereal/action-upterm@v2
         with:
           # 只授权触发本次工作流的账号（其 GitHub 公钥）进入，避免会话被他人接入
@@ -115,8 +120,10 @@ jobs:
           wait-timeout-minutes: 30
 
       # 步骤9: 整理并上传固件
+      # retention-days: 产物 7 天后由 GitHub 自动清理（默认是 90 天）
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: openwrt/bin/targets
+          retention-days: 7
